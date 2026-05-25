@@ -7,7 +7,7 @@
 #include <cstdio>
 
 // ==========================================
-// 1. MATEMATYKA (Struktury Wektorów i Promieni)
+// 1. MATEMATYKA 
 // ==========================================
 struct Vec3 {
     float x, y, z;
@@ -24,10 +24,7 @@ struct Vec3 {
 };
 
 __host__ __device__ float dot(const Vec3& u, const Vec3& v) { return u.x * v.x + u.y * v.y + u.z * v.z; }
-
-__host__ __device__ Vec3 cross(const Vec3& u, const Vec3& v) {
-    return Vec3(u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x);
-}
+__host__ __device__ Vec3 cross(const Vec3& u, const Vec3& v) { return Vec3(u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x); }
 
 struct Ray {
     Vec3 origin;
@@ -37,9 +34,9 @@ struct Ray {
 };
 
 // ==========================================
-// 2. FIZYKA ZDERZEŃ (Sfera i Nieskończona Podłoga)
+// 2. FIZYKA ZDERZEŃ (Architektura Pokoju)
 // ==========================================
-__device__ float hit_sphere(const Vec3& center, float radius, const Ray& r) {
+__host__ __device__ float hit_sphere(const Vec3& center, float radius, const Ray& r) {
     Vec3 oc = r.origin - center;
     float a = dot(r.direction, r.direction);
     float b = 2.0f * dot(oc, r.direction);
@@ -49,10 +46,29 @@ __device__ float hit_sphere(const Vec3& center, float radius, const Ray& r) {
     else return (-b - sqrt(discriminant)) / (2.0f * a);
 }
 
-__device__ float hit_plane(float plane_y, const Ray& r) {
+// Podłoga (Płaszczyzna na osi Y)
+__host__ __device__ float hit_floor(float floor_y, const Ray& r) {
     if (abs(r.direction.y) < 0.0001f) return -1.0f;
-    float t = (plane_y - r.origin.y) / r.direction.y;
+    float t = (floor_y - r.origin.y) / r.direction.y;
     return t > 0.0f ? t : -1.0f;
+}
+
+// NOWOŚĆ: Ściana (Płaszczyzna na osi Z) z wyciętymi drzwiami!
+__host__ __device__ float hit_wall(float wall_z, const Ray& r) {
+    if (abs(r.direction.z) < 0.0001f) return -1.0f;
+    float t = (wall_z - r.origin.z) / r.direction.z;
+    if (t <= 0.0f) return -1.0f;
+
+    // Pobieramy dokładny punkt uderzenia w ścianę
+    Vec3 p = r.point_at_parameter(t);
+
+    // MAGIA CSG: Wycinamy prostokątny otwór (drzwi/bramę)
+    // Jeśli promień trafia w strefę X od -1.5 do 1.5 oraz Y mniejsze niż 2.5 metra...
+    if (p.x > -1.5f && p.x < 1.5f && p.y < 2.5f) {
+        return -1.0f; // ...promień przelatuje na wylot (nie ma kolizji!)
+    }
+
+    return t; // Jeśli trafił w betonową część, zwracamy uderzenie
 }
 
 // ==========================================
@@ -67,41 +83,49 @@ __global__ void render(unsigned char* fb, int width, int height, float time,
     float u = (float(x) / float(width)) * 4.0f - 2.0f;
     float v = (float(height - y) / float(height)) * 3.0f - 1.5f;
 
-    // FOV i perspektywa
     float focal_length = 2.0f;
     Vec3 direction = (cam_right * u) + (cam_up * v) + (cam_forward * focal_length);
     Ray r(cam_pos, direction.normalize());
 
-    // Ustawienia sceny
-    Vec3 sphere_center(0.0f, 0.0f, -2.0f);
-    float sphere_radius = 0.5f;
+    // --- USTAWIENIA SCENY (Nasz "Pokój") ---
     float floor_y = -0.5f;
+    float wall_z = -4.0f; // Ściana stoi 4 metry "w głąb" ekranu (-Z)
+    Vec3 sphere_center(0.0f, 0.0f, -1.5f); // Kula stoi pomiędzy nami a ścianą
+    float sphere_radius = 0.5f;
 
-    // Fizyczna żarówka w stałym miejscu przestrzeni
-    Vec3 light_pos(2.0f, 2.0f, -1.0f);
+    // Słońce schowane ZA ŚCIANĄ (Z = -15.0). Wahadłowy ruch lewo-prawo, żeby światło tańczyło w drzwiach
+    Vec3 light_pos(sin(time * 0.5f) * 8.0f, 6.0f, -15.0f);
 
-    // Zmienne do śledzenia trafień
     float t_min = 99999.0f;
-    int hit_object = 0;
-    Vec3 hit_point;
-    Vec3 normal;
-    Vec3 base_color;
+    int hit_object = 0; // 0=niebo, 1=kula, 2=podłoga, 3=ściana
+    Vec3 hit_point, normal, base_color;
 
-    // Test 1: Podłoga
-    float t_plane = hit_plane(floor_y, r);
+    // 1. Test Podłogi
+    float t_plane = hit_floor(floor_y, r);
     if (t_plane > 0.0f && t_plane < t_min) {
         t_min = t_plane;
         hit_object = 2;
         hit_point = r.point_at_parameter(t_plane);
         normal = Vec3(0.0f, 1.0f, 0.0f);
-
-        int ix = floorf(hit_point.x * 2.0f);
-        int iz = floorf(hit_point.z * 2.0f);
-        if (abs(ix + iz) % 2 == 0) base_color = Vec3(220.0f, 220.0f, 220.0f);
-        else base_color = Vec3(60.0f, 60.0f, 60.0f);
+        // Zmniejszyłem kafelki dla lepszego efektu
+        int ix = floorf(hit_point.x * 4.0f);
+        int iz = floorf(hit_point.z * 4.0f);
+        if (abs(ix + iz) % 2 == 0) base_color = Vec3(200.0f, 200.0f, 200.0f);
+        else base_color = Vec3(80.0f, 80.0f, 80.0f);
     }
 
-    // Test 2: Kula
+    // 2. Test Ściany
+    float t_wall = hit_wall(wall_z, r);
+    if (t_wall > 0.0f && t_wall < t_min) {
+        t_min = t_wall;
+        hit_object = 3;
+        hit_point = r.point_at_parameter(t_wall);
+        // Wektor normalny zależy od tego, z której strony patrzymy na ścianę
+        normal = r.direction.z < 0.0f ? Vec3(0.0f, 0.0f, 1.0f) : Vec3(0.0f, 0.0f, -1.0f);
+        base_color = Vec3(100.0f, 150.0f, 200.0f); // Ładny, niebieskawy kolor ściany
+    }
+
+    // 3. Test Kuli
     float t_sphere = hit_sphere(sphere_center, sphere_radius, r);
     if (t_sphere > 0.0f && t_sphere < t_min) {
         t_min = t_sphere;
@@ -111,42 +135,41 @@ __global__ void render(unsigned char* fb, int width, int height, float time,
         base_color = Vec3(255.0f, 50.0f, 50.0f);
     }
 
-    // Kolorowanie piksela
+    // --- OŚWIETLENIE I CIENIE ---
     Vec3 pixel_color;
     if (hit_object > 0) {
         Vec3 light_dir = (light_pos - hit_point).normalize();
         float distance_to_light = (light_pos - hit_point).length();
 
+        // Wypuszczamy promień z naszego punktu do Słońca
         Ray shadow_ray(hit_point + normal * 0.001f, light_dir);
 
         bool in_shadow = false;
-        float t_shadow = hit_sphere(sphere_center, sphere_radius, shadow_ray);
-        if (t_shadow > 0.0f && t_shadow < distance_to_light) {
-            in_shadow = true;
-        }
+
+        // Czy kula zasłania słońce?
+        float t_shadow_sph = hit_sphere(sphere_center, sphere_radius, shadow_ray);
+        if (t_shadow_sph > 0.0f && t_shadow_sph < distance_to_light) in_shadow = true;
+
+        // Czy ŚCIANA zasłania słońce? (To tu dzieje się magia wejścia światła!)
+        float t_shadow_wall = hit_wall(wall_z, shadow_ray);
+        if (t_shadow_wall > 0.0f && t_shadow_wall < distance_to_light) in_shadow = true;
 
         float light_intensity = dot(normal, light_dir);
         if (light_intensity < 0.0f) light_intensity = 0.0f;
         if (in_shadow) light_intensity = 0.0f;
 
-        // Tłumienie światła z odległością (Falloff)
-        float attenuation = 1.0f / (1.0f + 0.1f * distance_to_light * distance_to_light);
-        light_intensity *= attenuation;
-
+        // Jeśli jesteśmy w cieniu, zostaje tylko lekki mrok otoczenia
         float ambient = 0.15f;
         float brightness = ambient + (1.0f - ambient) * light_intensity;
 
         pixel_color = base_color * brightness;
     }
     else {
-        // Czy promień z kamery trafił prosto w naszą żarówkę?
-        float t_light = hit_sphere(light_pos, 0.15f, r);
-
+        float t_light = hit_sphere(light_pos, 2.0f, r); // Wielkie słońce
         if (t_light > 0.0f) {
-            pixel_color = Vec3(255.0f, 255.0f, 255.0f); // Rysujemy białą żarówkę
+            pixel_color = Vec3(255.0f, 255.0f, 220.0f);
         }
         else {
-            // Tło - niebo
             float t = 0.5f * (r.direction.y + 1.0f);
             pixel_color = Vec3(255.0f, 255.0f, 255.0f) * (1.0f - t) + Vec3(127.0f, 178.0f, 255.0f) * t;
         }
@@ -158,14 +181,90 @@ __global__ void render(unsigned char* fb, int width, int height, float time,
     fb[pixel_index + 2] = (unsigned char)pixel_color.z;
 }
 
+// ==========================================
+// WERSJA CPU (Podwójna pętla for zamiast wątków)
+// ==========================================
+void render_cpu(unsigned char* fb, int width, int height, float time,
+    Vec3 cam_pos, Vec3 cam_forward, Vec3 cam_right, Vec3 cam_up) {
+       #pragma omp parallel for
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+
+            float u = (float(x) / float(width)) * 4.0f - 2.0f;
+            float v = (float(height - y) / float(height)) * 3.0f - 1.5f;
+
+            float focal_length = 2.0f;
+            Vec3 direction = (cam_right * u) + (cam_up * v) + (cam_forward * focal_length);
+            Ray r(cam_pos, direction.normalize());
+
+            float floor_y = -0.5f;
+            float wall_z = -4.0f;
+            Vec3 sphere_center(0.0f, 0.0f, -1.5f);
+            float sphere_radius = 0.5f;
+
+            Vec3 light_pos(sin(time * 0.5f) * 8.0f, 6.0f, -15.0f);
+
+            float t_min = 99999.0f;
+            int hit_object = 0;
+            Vec3 hit_point, normal, base_color;
+
+            float t_plane = hit_floor(floor_y, r);
+            if (t_plane > 0.0f && t_plane < t_min) {
+                t_min = t_plane; hit_object = 2; hit_point = r.point_at_parameter(t_plane); normal = Vec3(0.0f, 1.0f, 0.0f);
+                int ix = floorf(hit_point.x * 4.0f); int iz = floorf(hit_point.z * 4.0f);
+                if (abs(ix + iz) % 2 == 0) base_color = Vec3(200.0f, 200.0f, 200.0f); else base_color = Vec3(80.0f, 80.0f, 80.0f);
+            }
+
+            float t_wall = hit_wall(wall_z, r);
+            if (t_wall > 0.0f && t_wall < t_min) {
+                t_min = t_wall; hit_object = 3; hit_point = r.point_at_parameter(t_wall);
+                normal = r.direction.z < 0.0f ? Vec3(0.0f, 0.0f, 1.0f) : Vec3(0.0f, 0.0f, -1.0f); base_color = Vec3(100.0f, 150.0f, 200.0f);
+            }
+
+            float t_sphere = hit_sphere(sphere_center, sphere_radius, r);
+            if (t_sphere > 0.0f && t_sphere < t_min) {
+                t_min = t_sphere; hit_object = 1; hit_point = r.point_at_parameter(t_sphere);
+                normal = (hit_point - sphere_center).normalize(); base_color = Vec3(255.0f, 50.0f, 50.0f);
+            }
+
+            Vec3 pixel_color;
+            if (hit_object > 0) {
+                Vec3 light_dir = (light_pos - hit_point).normalize();
+                float distance_to_light = (light_pos - hit_point).length();
+                Ray shadow_ray(hit_point + normal * 0.001f, light_dir);
+                bool in_shadow = false;
+                if (hit_sphere(sphere_center, sphere_radius, shadow_ray) > 0.0f && hit_sphere(sphere_center, sphere_radius, shadow_ray) < distance_to_light) in_shadow = true;
+                if (hit_wall(wall_z, shadow_ray) > 0.0f && hit_wall(wall_z, shadow_ray) < distance_to_light) in_shadow = true;
+
+                float light_intensity = dot(normal, light_dir);
+                if (light_intensity < 0.0f) light_intensity = 0.0f;
+                if (in_shadow) light_intensity = 0.0f;
+                pixel_color = base_color * (0.15f + (1.0f - 0.15f) * light_intensity);
+            }
+            else {
+                if (hit_sphere(light_pos, 2.0f, r) > 0.0f) pixel_color = Vec3(255.0f, 255.0f, 220.0f);
+                else { float t = 0.5f * (r.direction.y + 1.0f); pixel_color = Vec3(255.0f, 255.0f, 255.0f) * (1.0f - t) + Vec3(127.0f, 178.0f, 255.0f) * t; }
+            }
+
+            int pixel_index = (y * width + x) * 3;
+            fb[pixel_index + 0] = (unsigned char)pixel_color.x;
+            fb[pixel_index + 1] = (unsigned char)pixel_color.y;
+            fb[pixel_index + 2] = (unsigned char)pixel_color.z;
+        }
+    }
+}
+
 int ceil_div(int a, int b) { return (a + b - 1) / b; }
 
 // ==========================================
 // 4. GŁÓWNA FUNKCJA (Obsługa okna, myszy FPS)
 // ==========================================
 int main() {
-    int width = 800;
-    int height = 600;
+    int width = 1920;
+    int height = 1080;
+
+    bool use_gpu = true;
+    bool space_was_pressed = false;
 
     if (!glfwInit()) return -1;
     GLFWwindow* window = glfwCreateWindow(width, height, "Ray Tracer CUDA 3D", NULL, NULL);
@@ -250,12 +349,25 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) camera_pos = camera_pos - world_up * camera_speed;
 
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
+        bool space_is_pressed = (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
+        if (space_is_pressed && !space_was_pressed) {
+            use_gpu = !use_gpu; // Odwracamy tryb
+        }
+        space_was_pressed = space_is_pressed;
+
 
         // RENDEROWANIE CUDA
-        render << <grid, blocks >> > (d_fb, width, height, (float)current_time, camera_pos, cam_forward, cam_right, cam_up);
-        cudaDeviceSynchronize();
-
-        cudaMemcpy(h_fb.data(), d_fb, fb_size, cudaMemcpyDeviceToHost);
+        if (use_gpu) {
+            // GPU: Odpalamy Kernel z tysiącami wątków
+            render << <grid, blocks >> > (d_fb, width, height, (float)current_time, camera_pos, cam_forward, cam_right, cam_up);
+            cudaDeviceSynchronize();
+            // Kopiujemy wynik z pamięci karty graficznej do RAM-u komputera
+            cudaMemcpy(h_fb.data(), d_fb, fb_size, cudaMemcpyDeviceToHost);
+        }
+        else {
+            // CPU: Procesor sam liczy obraz, pisząc bezpośrednio do zwykłego RAM-u (h_fb)
+            render_cpu(h_fb.data(), width, height, (float)current_time, camera_pos, cam_forward, cam_right, cam_up);
+        }
 
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, h_fb.data());
         glClear(GL_COLOR_BUFFER_BIT);
@@ -276,8 +388,11 @@ int main() {
             double frame_time = 1000.0 / double(nb_frames);
             double fps = double(nb_frames);
             char title[256];
-            snprintf(title, sizeof(title), "Ray Tracer CUDA | Tryb: GPU | %.1f FPS | %.2f ms | Cam: %.1f, %.1f, %.1f",
-                fps, frame_time, camera_pos.x, camera_pos.y, camera_pos.z);
+
+            // W jednej, ciągłej linijce:
+            snprintf(title, sizeof(title), "Ray Tracer CUDA | Tryb: %s | %.1f FPS | %.2f ms | Cam: %.1f, %.1f, %.1f",
+                use_gpu ? "GPU (Szybko)" : "CPU (Wolno)", fps, frame_time, camera_pos.x, camera_pos.y, camera_pos.z);
+
             glfwSetWindowTitle(window, title);
             nb_frames = 0;
             last_time += 1.0;
