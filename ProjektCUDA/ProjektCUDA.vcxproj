@@ -107,6 +107,12 @@
   <ItemGroup>
     <CudaCompile Include="kernel.cu" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="camera.cuh" />
+    <ClInclude Include="physics.cuh" />
+    <ClInclude Include="renderer.cuh" />
+    <ClInclude Include="vec3.cuh" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 12.8.targets" />
