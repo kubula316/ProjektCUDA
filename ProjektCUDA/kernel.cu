@@ -10,8 +10,6 @@
 #include "renderer.cuh"
 #include "camera.cuh" // <--- Ładujemy nasz nowy moduł sterowania!
 
-int ceil_div(int a, int b) { return (a + b - 1) / b; }
-
 int main() {
     int width = 1280; // Zmieniłem na 720p dla wygody prezentacji w oknie
     int height = 720;
