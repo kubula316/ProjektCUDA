@@ -3,26 +3,25 @@
 #include "vec3.cuh"
 #include <math.h>
 
+// ==========================================
+// KAMERA/INPUTY
+// ==========================================
 class Camera {
 public:
-    // G³ówne wektory potrzebne do Kernela
     Vec3 position;
     Vec3 forward;
     Vec3 right;
     Vec3 up;
 
-    // Zmienne obrotu
     float yaw;
     float pitch;
     float speed;
     float sensitivity;
 
-    // Stan myszy
     bool first_mouse;
     double last_mouse_x;
     double last_mouse_y;
 
-    // Konstruktor (wywo³uje siê raz przy starcie programu)
     Camera(Vec3 start_pos) {
         position = start_pos;
         yaw = -90.0f;
@@ -35,7 +34,6 @@ public:
         update_vectors();
     }
 
-    // Przelicza k¹ty na wektory 3D
     void update_vectors() {
         float yaw_rad = yaw * 3.14159265f / 180.0f;
         float pitch_rad = pitch * 3.14159265f / 180.0f;
@@ -51,9 +49,7 @@ public:
         up = cross(right, forward).normalize();
     }
 
-    // TA FUNKCJA ZASTÊPUJE PO£OWÊ TWOJEGO STAREGO MAINA!
     void process_input(GLFWwindow* window, float delta_time) {
-        // 1. Obs³uga myszy
         double mouse_x, mouse_y;
         glfwGetCursorPos(window, &mouse_x, &mouse_y);
 
@@ -71,13 +67,10 @@ public:
         yaw += offset_x * sensitivity;
         pitch += offset_y * sensitivity;
 
-        // Blokada "fiko³ków" kamery
         if (pitch > 89.0f) pitch = 89.0f;
         if (pitch < -89.0f) pitch = -89.0f;
 
         update_vectors();
-
-        // 2. Obs³uga klawiatury
         float velocity = speed * delta_time;
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) position = position + forward * velocity;
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) position = position - forward * velocity;

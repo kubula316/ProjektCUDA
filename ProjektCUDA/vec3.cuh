@@ -3,7 +3,7 @@
 #include <math.h>
 
 // ==========================================
-// 1. MATEMATYKA 
+// MATEMATYKA 
 // ==========================================
 struct Vec3 {
     float x, y, z;
@@ -14,8 +14,13 @@ struct Vec3 {
     __host__ __device__ Vec3 operator*(float t) const { return Vec3(x * t, y * t, z * t); }
     __host__ __device__ float length() const { return sqrt(x * x + y * y + z * z); }
     __host__ __device__ Vec3 normalize() const {
-        float len = length();
+#ifdef __CUDA_ARCH__
+        float inv_len = rsqrtf(x * x + y * y + z * z);
+        return Vec3(x * inv_len, y * inv_len, z * inv_len);
+#else
+        float len = sqrt(x * x + y * y + z * z);
         return Vec3(x / len, y / len, z / len);
+#endif
     }
 };
 
