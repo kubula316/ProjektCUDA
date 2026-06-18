@@ -45,8 +45,8 @@ int main() {
     // ==========================================
     // INICJALIZACJA SCENY I PARAMETRÓW TESTU
     // ==========================================
-    int num_spheres = 64;      // liczba obiektów przed kompilacją
-    int shadow_samples = 32;    // jakość cieni (np. 1, 4, 16, 64)
+    int num_spheres = 16;      // liczba obiektów przed kompilacją
+    int shadow_samples = 16;    // jakość cieni (np. 1, 4, 16, 64)
 
     std::vector<Sphere> h_spheres(num_spheres);
 
@@ -80,11 +80,11 @@ int main() {
         space_was_pressed = space_is_pressed;
 
         // ==========================================
-        // SYSTEM BENCHMARKOWANIA
+        // MARKOWANIA
         // ==========================================
         bool b_is_pressed = (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS);
         if (b_is_pressed && !b_was_pressed) {
-            std::cout << "\n--- ROZPOCZYNAM BENCHMARK ---" << std::endl;
+            std::cout << "\n--- BENCHMARK ---" << std::endl;
             std::cout << "Sfery: " << num_spheres << " | Probki Cieni: " << shadow_samples << std::endl;
 
             // Parametry testu
